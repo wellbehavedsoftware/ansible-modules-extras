@@ -52,35 +52,45 @@ options:
 '''
 
 EXAMPLES = '''
-# starts lxc-name linux container
-- lxc: name=lxc-name action=start
+# starts empty01 linux container
+- lxc: name=empty01 action=start
 
-# stops lxc-name linux container
-- lxc: name=lxc-name action=stop
+# stops empty01 linux container
+- lxc: name=empty01 action=stop
+
+# destroys empty01 linux container
+- lxc: name=empty01 action=destroy
+
+# creates empty01 linux container
+- lxc: name=empty01 action=create template=ubuntu template_options="-r precise"
 
 '''
 
-import lxc
+import commands
+import os
 
 def _start_container(container):
     name = container.params['name']
 
-    if name in lxc.stopped():
-       lxc.start(name)
+    if "STOPPED" in commands.getoutput('sudo lxc-info -n '+name):
+       os.system("sudo lxc-start -n "+name+" --daemon")
+       container.exit_json(changed=True, msg="Container "+name+" started.")
     else:
-        print "UNCHANGED. Container already running."
+        container.exit_json(changed=False, msg="Container already running.")
 
 def _stop_container(container):
     name = container.params['name']
 
-    if name in lxc.running():
-       lxc.stop(name)
+    if "RUNNING" in commands.getoutput('sudo lxc-info -n '+name):
+       os.system("sudo lxc-stop -n "+name)
+       container.exit_json(changed=True, msg="Container "+name+" stopped.")
     else:
-        print "UNCHANGED. Container already stopped."
+        container.exit_json(changed=False, msg="Container already stopped.")
 
 def _destroy_container(container):
     name = container.params['name']
-    lxc.destroy(name)
+    os.system("sudo lxc-destroy -n "+name)
+    container.exit_json(changed=True, msg="Container "+name+" destroyed.")
 
 def _create_container(container):
     name = container.params['name']
@@ -89,7 +99,18 @@ def _create_container(container):
     backing_store=container.params['backing_store']
     template_options=container.params['template_options']
 
-    lxc.create(name, config_file, template, backing_store, template_options)
+    cmd = "sudo lxc-create -n "+name
+    if config_file is not None:
+        cmd = cmd + " -f "+config_file
+    if template is not None:
+        cmd = cmd + " -t "+template
+    if backing_store is not None:
+        cmd = cmd + " -B "+backing_store
+    if template_options is not None:
+        cmd = cmd + " -- "+template_options
+
+    os.system(cmd)
+    container.exit_json(changed=True, msg="Container "+name+" created.")
 
 def main():
     container = AnsibleModule(
@@ -104,7 +125,7 @@ def main():
     )
 
     name = container.params['name']
-    if lxc.exists(name):
+    if "doesn't exist" not in commands.getoutput('sudo lxc-info -n '+name):
         if container.params['action'] == 'start':
             _start_container(container)
 
@@ -115,12 +136,12 @@ def main():
             _destroy_container(container)
 
         if container.params['action'] == 'create':
-            print "The specified container already exists."
+            container.exit_json(changed=False, msg="The specified container ("+name+") already exists and can not be created again.")
     else:
         if container.params['action'] == 'create':
             _create_container(container)
         else: 
-            print "The specified container does not exist."
+            container.exit_json(changed=False, msg="The specified container ("+name+") does not exist. Create it first.")
 
 # import module snippets
 from ansible.module_utils.basic import *
